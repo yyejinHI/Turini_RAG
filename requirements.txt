@@ -1,0 +1,28 @@
+# Web
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+
+# Env
+python-dotenv>=1.0
+
+# LLM / Embedding
+openai>=1.30
+langchain-openai>=0.1.7
+langchain-community>=0.0.30
+langchain-core>=0.1.40
+
+# Vector store / Search
+faiss-cpu>=1.7.4
+rank-bm25>=0.2.2
+numpy>=1.24
+
+# Korean tokenizer
+kiwipiepy>=0.17
+
+# Reranker
+sentence-transformers>=2.5
+torch>=2.0
+
+# Observability (옵션 — LANGSMITH_TRACING 시 활성)
+langsmith>=0.1.40

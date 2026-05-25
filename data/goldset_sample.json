@@ -1,0 +1,41 @@
+[
+  {
+    "query_id": "Q001",
+    "question": "보수적 성향이고 단기 자금인데 어떤 상품이 있나요?",
+    "user_info": "45세, 위험성향 보수적, 투자기간 단기 (1년 미만)",
+    "relevant_portfolio_ids": ["P002", "P005"],
+    "reference_answer": "안정형 국공채 펀드와 단기 MMF 가 적합합니다. ...",
+    "turn_type": "initial"
+  },
+  {
+    "query_id": "Q002",
+    "question": "노후 준비를 시작하고 싶은데 어떤 상품이 있어요?",
+    "user_info": "40세, 위험성향 중립, 투자목적 노후대비, 투자기간 장기 (3년 이상)",
+    "relevant_portfolio_ids": ["P004"],
+    "reference_answer": "노후대비 TDF 2045 가 ...",
+    "turn_type": "initial"
+  },
+  {
+    "query_id": "Q003",
+    "question": "그건 총보수가 얼마예요?",
+    "user_info": "40세, 위험성향 중립, 투자목적 노후대비",
+    "relevant_portfolio_ids": ["P004"],
+    "reference_answer": "노후대비 TDF 2045 의 총보수는 연 0.7% 입니다.",
+    "turn_type": "followup",
+    "_note": "멀티턴 평가용 — 이전 턴이 Q002 라는 가정. 단일 호출 평가 시엔 question 에 'TDF 2045' 가 명시되지 않아 rewrite 검증용."
+  },
+  {
+    "query_id": "Q004",
+    "question": "미국 주식에 공격적으로 투자하고 싶어요",
+    "user_info": "32세, 위험성향 공격적, 투자기간 장기 (3년 이상), 투자경험 고급",
+    "relevant_portfolio_ids": ["P003"],
+    "turn_type": "initial"
+  },
+  {
+    "query_id": "Q005",
+    "question": "글로벌 분산투자 ETF 알려줘",
+    "user_info": null,
+    "relevant_portfolio_ids": ["P001"],
+    "turn_type": "initial"
+  }
+]
