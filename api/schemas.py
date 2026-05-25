@@ -1,7 +1,7 @@
 """Pydantic Request/Response 모델.
 
-투자자 프로필 (InvestorProfile) 기반.
-원본 MOZI 의 노인 복지 프로필 → 금융 도메인 투자자 정보로 치환.
+금융 도메인 투자자 프로필(InvestorProfile)을 정의하고,
+/chat 엔드포인트의 요청·응답·에러 스키마를 한 곳에서 관리한다.
 """
 
 from __future__ import annotations

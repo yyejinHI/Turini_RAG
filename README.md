@@ -1,7 +1,7 @@
 # Finance RAG 챗봇 — 베이스라인
 
 금융 포트폴리오·상품 설명과 후속 Q&A를 위한 RAG 챗봇 베이스라인.
-**MOZI 복지 챗봇(`api/`)** 의 검증된 파이프라인을 금융 도메인으로 이식한 구조입니다.
+Hybrid 검색(Dense + BM25 + RRF) → CrossEncoder 리랭킹 → LLM 답변 생성에 멀티턴 컨텍스트 관리를 결합한 구조입니다.
 
 핵심 파이프라인:
 
@@ -109,35 +109,50 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### 5. 호출 테스트
 
+본 챗봇은 **개념·정보 안내용**입니다 — 특정 종목·상품을 매수/매도하라는 권유는 하지 않습니다. 질문도 개념·용어·운용 원리 위주로 보내야 의미 있는 답이 옵니다.
+
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $CHATBOT_API_KEY" \
   -d '{
-    "message": "노후 준비할 수 있는 상품 알려줘",
+    "message": "글로벌 분산투자가 뭐고 어떤 특징이 있나요?",
     "conversationId": "test-001",
     "user": {
       "userId": 42,
       "profile": {
         "age": 40, "gender": "M",
         "riskTolerance": "중립",
-        "investmentGoal": "노후대비",
+        "investmentGoal": "자산증식",
         "investmentHorizon": "장기 (3년 이상)",
         "investmentExperience": "중급",
-        "hasFundExperience": true
+        "hasFundExperience": true,
+        "hasEtfExperience": true
       }
     }
   }'
 ```
 
-응답:
+응답 (개념 설명 — 검색된 상품 자료를 근거로 인용):
 ```json
 {
-  "reply": "노후대비 TDF 2045 ...",
+  "reply": "글로벌 분산투자는 여러 국가·자산군에 나눠 투자해 특정 시장의 위험을 줄이는 방식입니다. 예를 들어 [자료]의 코어 글로벌 분산 ETF는 선진국 주식 60% / 글로벌 채권 30% / 대체자산 10% 비중으로 운용됩니다 ...",
   "conversationId": "test-001",
-  "recommendedPortfolioIds": ["P004"]
+  "recommendedPortfolioIds": ["P001"]
 }
 ```
+
+추가 예시 — 개념·용어·운용 원리형 질문:
+```bash
+# message 예시
+"ETF 와 펀드는 뭐가 달라요?"
+"TDF 는 어떤 원리로 운용되나요?"
+"환헤지가 적용되면 어떤 차이가 있어요?"
+"위험등급은 어떻게 매겨지나요?"
+"총보수와 환매수수료의 차이가 뭐예요?"
+```
+
+> `recommendedPortfolioIds` 는 답변 근거로 *참조된* 상품 ID 일 뿐, 매수 권유가 아닙니다. 프론트엔드에서 "이 답변은 다음 상품 정보를 참고했습니다" 같은 출처 표시 용도로 쓰는 걸 권장.
 
 ---
 

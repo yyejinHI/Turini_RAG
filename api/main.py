@@ -3,19 +3,19 @@
 실행 (프로젝트 루트에서):
   python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
-호출 예시:
+호출 예시 (개념·정보형 질문 — 본 챗봇은 종목 매수/매도 권유를 하지 않음):
   curl -X POST http://localhost:8000/chat \\
        -H "Content-Type: application/json" \\
        -H "X-API-Key: $CHATBOT_API_KEY" \\
        -d '{
-         "message": "내 포트폴리오 위험도 알려줘",
+         "message": "위험등급은 어떻게 매겨지고 등급별로 어떤 차이가 있나요?",
          "conversationId": "8c4f5a72-1f3e-4b2a-9c8e-7a1b3d4e5f6a",
          "user": {
            "userId": 1,
            "profile": {
              "age": 55, "gender": "F",
              "riskTolerance": "보수적",
-             "investmentGoal": "노후대비",
+             "investmentGoal": "자산증식",
              "investmentHorizon": "장기 (3년 이상)",
              "investmentExperience": "중급",
              "hasFundExperience": true,
