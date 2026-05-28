@@ -3,10 +3,14 @@
 첫 실행 시 1회 (OpenAI 임베딩 API 호출 비용 발생).
 이후 vectorstores/ 디렉토리 그대로 두면 챗봇 서버는 로드만 함.
 
-원본 데이터 형식:
-  - JSON 배열, 각 원소 = 한 금융상품 dict
-  - 필드: portfolio_id, name, asset_class, risk_level, expected_return,
-          investment_strategy, target_investor, fees, ... (CONTENT_FIELDS 참조)
+원본 데이터 형식 (JSONL, 1줄 = 1청크):
+  - 공통 필드: chunk_id, doc_id, source_name, source_url, title, section_title,
+              topic, published_date, text, embedding_text, chunk_index, total_chunks,
+              prev_chunk_id, next_chunk_id, source_file
+  - 파일별 추가 필드:
+      05_tax_deduction_fund         : subsection_type
+      fss_financial_companies_merged: sector_code, sector_name, company_name,
+                                      fin_co_no, homepage_url
 
 산출:
   - <INDEX_DIR>/portfolio/chunk_record/{index.faiss, index.pkl}   ← FAISS
@@ -15,14 +19,14 @@
 실행:
   python scripts/build_indexes.py
 
-  # 데이터 경로 override
-  PORTFOLIO_DATA_PATH=/path/to/data.json python scripts/build_indexes.py
+  # 데이터 경로 / 파일 패턴 override
+  CORPUS_GLOB="data/01_*.jsonl,data/02_*.jsonl" python scripts/build_indexes.py
 
 ------------------------------------------------------------
 실험 포인트:
-  - CONTENT_FIELDS  : 어떤 필드를 임베딩에 넣을지 (검색 신호 디자인의 핵심)
-  - METADATA_FIELDS : 어떤 필드를 메타로 보존할지 (응답 표시용)
-  - 청킹 전략: 현재 1행=1청크. 긴 설명문은 sentence splitter 로 추가 청크 분리 실험.
+  - PAGE_CONTENT_SOURCE : 'embedding_text' vs 'text' vs 'title+text' 조합
+  - METADATA_FIELDS     : 어떤 필드를 메타로 보존할지 (응답 표시용)
+  - CORPUS_GLOB         : 어떤 JSONL 들을 인덱싱 대상에 포함할지
 """
 
 from __future__ import annotations
@@ -45,94 +49,140 @@ from rank_bm25 import BM25Okapi
 from config import DOMAIN, EMBEDDING_MODEL, INDEX_DIR, OPENAI_API_KEY, PROJECT_ROOT
 from core.tokenizer import make_tokenizer
 
-# 원본 데이터 경로 (기본: <PROJECT_ROOT>/data/portfolios.json)
-DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "portfolios.json"
-DATA_PATH = Path(os.getenv("PORTFOLIO_DATA_PATH", str(DEFAULT_DATA_PATH)))
+# ============================================================
+# 코퍼스 선택
+#   기본: data/ 하위 모든 .jsonl
+#   CORPUS_GLOB 환경변수로 콤마 구분 패턴(루트 기준 상대경로) 지정 가능.
+# ============================================================
+DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
+CORPUS_GLOB = os.getenv("CORPUS_GLOB", "")
+
+
+def _resolve_corpus_files() -> List[Path]:
+    if CORPUS_GLOB:
+        files: List[Path] = []
+        for pat in [p.strip() for p in CORPUS_GLOB.split(",") if p.strip()]:
+            files.extend(sorted(PROJECT_ROOT.glob(pat)))
+        return files
+    return sorted(DEFAULT_DATA_DIR.glob("*.jsonl"))
 
 
 # ============================================================
-# 임베딩에 들어가는 본문 필드 (검색 신호 강한 자유 텍스트 위주)
-#   ※ 실험 시 이 리스트를 늘리거나 줄여 검색 정확도 영향 측정.
+# page_content 결정 — 검색에 들어가는 단일 텍스트.
+#   각 JSONL 줄에 이미 embedding_text 가 정제돼 있으므로 그대로 사용.
+#   비어 있으면 title + text 로 fallback.
 # ============================================================
-CONTENT_FIELDS = [
-    "name",
-    "description",
-    "asset_class",
-    "risk_level",
-    "expected_return",
-    "investment_strategy",
-    "target_investor",
-    "recommended_horizon",
-    "fees",
-    "holdings_summary",
-    "benchmark",
-    "key_features",
-    "tax_treatment",
-]
-
-
-# ============================================================
-# 메타데이터로 보존할 필드 (검색 결과 표시·식별·식별 ID 용)
-# ============================================================
-METADATA_FIELDS = [
-    "portfolio_id",
-    "name",
-    "asset_class",
-    "risk_level",
-    "manager",
-    "inception_date",
-    "detail_url",
-    "ticker",
-    "currency",
-]
-
-
 def _row_to_text(row: dict) -> str:
-    """금융상품 dict → 검색용 단일 텍스트.
+    et = (row.get("embedding_text") or "").strip()
+    if et:
+        return et
+    title = (row.get("title") or "").strip()
+    text = (row.get("text") or "").strip()
+    if title and text:
+        return f"{title}\n\n{text}"
+    return title or text
 
-    필드 앞에 [필드명] 라벨을 붙여 임베딩 모델이 정보 종류를 구분할 수 있게.
-    빈 값은 건너뜀.
-    """
-    parts: List[str] = []
-    for f in CONTENT_FIELDS:
+
+# ============================================================
+# 메타데이터로 보존할 필드.
+#   - downstream 호환: core/hybrid_search.py 는 metadata.portfolio_id 를 doc_id 로,
+#     metadata.name 을 표시용으로 씀. 새 스키마의 chunk_id / title 을 이 자리에 매핑.
+# ============================================================
+COMMON_META_FIELDS = [
+    "doc_id",
+    "chunk_id",
+    "chunk_index",
+    "total_chunks",
+    "prev_chunk_id",
+    "next_chunk_id",
+    "source_name",
+    "source_url",
+    "source_file",
+    "title",
+    "section_title",
+    "topic",
+    "published_date",
+]
+
+# FSS(금융사) 전용 — 있을 때만 보존
+FSS_META_FIELDS = [
+    "company_name",
+    "sector_name",
+    "sector_code",
+    "fin_co_no",
+    "homepage_url",
+]
+
+# tax_deduction 전용
+EXTRA_META_FIELDS = [
+    "subsection_type",
+]
+
+
+def _row_to_metadata(row: dict) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    for f in COMMON_META_FIELDS + FSS_META_FIELDS + EXTRA_META_FIELDS:
         v = row.get(f)
-        if v in (None, "", []):
-            continue
-        # list 필드는 콤마 결합
-        if isinstance(v, list):
-            v = ", ".join(str(x) for x in v)
-        parts.append(f"[{f}] {v}")
-    return "\n".join(parts)
+        if v not in (None, "", []):
+            meta[f] = v
+    # downstream(core/hybrid_search.py) 호환용 별칭
+    meta["portfolio_id"] = row.get("chunk_id") or row.get("doc_id") or ""
+    # 표시용 name — FSS 는 회사명, 그 외엔 title
+    meta["name"] = row.get("company_name") or row.get("title") or ""
+    return meta
+
+
+# ============================================================
+# JSONL 로더 (UTF-8 BOM 허용)
+# ============================================================
+def _load_jsonl(path: Path) -> List[dict]:
+    rows: List[dict] = []
+    with open(path, "r", encoding="utf-8-sig") as f:
+        for ln, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"[warn] {path.name}:{ln} JSON parse error: {e}")
+    return rows
 
 
 def load_source_documents() -> List[Document]:
-    if not DATA_PATH.exists():
+    files = _resolve_corpus_files()
+    if not files:
         raise SystemExit(
-            f"원본 데이터를 찾을 수 없습니다: {DATA_PATH}\n"
-            f"PORTFOLIO_DATA_PATH 환경변수로 위치를 지정하거나, "
-            f"data/portfolios.json 에 파일을 두세요.\n"
-            f"샘플 파일: data/portfolios_sample.json"
+            f"인덱싱 대상 JSONL 을 찾을 수 없습니다.\n"
+            f"기본 경로: {DEFAULT_DATA_DIR}/*.jsonl\n"
+            f"또는 CORPUS_GLOB 환경변수로 패턴 지정 (콤마 구분, 루트 기준 상대경로)."
         )
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        rows = json.load(f)
+
     docs: List[Document] = []
-    for row in rows:
-        text = _row_to_text(row)
-        if not text.strip():
-            continue
-        metadata = {k: row.get(k) for k in METADATA_FIELDS}
-        docs.append(Document(page_content=text, metadata=metadata))
+    per_file_counts: List[str] = []
+    for path in files:
+        rows = _load_jsonl(path)
+        n_added = 0
+        for row in rows:
+            text = _row_to_text(row)
+            if not text.strip():
+                continue
+            docs.append(Document(page_content=text, metadata=_row_to_metadata(row)))
+            n_added += 1
+        per_file_counts.append(f"  - {path.name}: {n_added} chunks")
+
+    print(f"[load] {len(files)} files → {len(docs)} chunks total")
+    for line in per_file_counts:
+        print(line)
     return docs
 
 
 # ============================================================
 # FAISS (Dense)
 # ============================================================
-def build_faiss() -> None:
+def build_faiss(docs: List[Document]) -> None:
     if not OPENAI_API_KEY:
         raise SystemExit("OPENAI_API_KEY 가 .env 에 없습니다.")
-    print(f"[faiss] source: {DATA_PATH}")
-    docs = load_source_documents()
     print(f"[faiss] documents: {len(docs)}")
     print(f"[faiss] embedding ({EMBEDDING_MODEL}) — OpenAI API 호출 시작...")
     embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL, api_key=OPENAI_API_KEY)
@@ -146,9 +196,7 @@ def build_faiss() -> None:
 # ============================================================
 # BM25 (Sparse)
 # ============================================================
-def build_bm25() -> None:
-    print(f"[bm25] source: {DATA_PATH}")
-    docs = load_source_documents()
+def build_bm25(docs: List[Document]) -> None:
     serial_docs: List[Dict[str, Any]] = [
         {"page_content": d.page_content, "metadata": dict(d.metadata)}
         for d in docs
@@ -179,9 +227,11 @@ def build_bm25() -> None:
 def main() -> None:
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
     print(f"== building indexes into: {INDEX_DIR} ==")
-    build_faiss()
+    docs = load_source_documents()
     print()
-    build_bm25()
+    build_faiss(docs)
+    print()
+    build_bm25(docs)
     print("\n== done ==")
     print("이제 다음 명령으로 서버 기동:")
     print("  python -m uvicorn api.main:app --host 0.0.0.0 --port 8000")

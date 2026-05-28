@@ -24,5 +24,5 @@ kiwipiepy>=0.17
 sentence-transformers>=2.5
 torch>=2.0
 
-# Observability (옵션 — LANGSMITH_TRACING 시 활성)
+# Observability (optional - enabled when LANGSMITH_TRACING is set)
 langsmith>=0.1.40
